@@ -276,3 +276,106 @@ pipeline link, dashboard link) into the PR description.
 
 ### Stretch
 - Restore RDS from an automated backup into a new instance and prove the data is there, then delete the restored instance.
+
+---
+
+## AI track — Stories 13–16
+
+Do these after Story 10 (observability) and Story 11 (secrets), and **before** Story 12 teardown — or re-provision with Story 5/7 Terraform first if you have already torn the cluster down. Same rule as before: one story = one branch = one pull request, done only on acceptance criteria with evidence in the PR. No app code is written for you; these are your build items, in order.
+
+---
+
+## Story 13 — MLOps core: train, register, serve, monitor
+
+**Tools:** MLflow, scikit-learn, FastAPI, Docker, EKS (or kind/minikube), Terraform, GitHub Actions, Prometheus, Grafana
+**Concepts you'll learn:** experiment tracking, model registry, model serving, retraining pipelines, drift monitoring, canary/rollback for models.
+**Depends on:** Story 7 (EKS) and Story 10 (observability).
+
+### Tasks
+1. Train a small model on TaskBoard-like data (e.g. task-priority prediction, or any small classifier — the model itself is not the point, the pipeline is). Record ML fundamentals used: train/validation split, metrics, overfitting check, leakage check.
+2. Track experiments and register the model in MLflow (tracking server + registry, versioned).
+3. Serve the registered model behind a FastAPI endpoint on the EKS cluster (or kind/minikube), Dockerised, with Terraform for any new infra.
+4. CI/CD for retrain-and-deploy: a GitHub Actions workflow that retrains, registers a new version, and deploys it, without manual console clicks.
+5. Prometheus/Grafana for the model service: request rate, error rate, p95 latency, plus a simple drift signal (e.g. input distribution or prediction distribution shift).
+6. Practice rollback/canary: promote a new model version gradually, then roll back to the previous version, and record the steps.
+
+### Acceptance criteria
+- [ ] An MLflow run and a registered, versioned model exist, with metrics recorded.
+- [ ] The model endpoint serves predictions on the cluster and passes a health check.
+- [ ] A CI run retrains and deploys a new model version; a bad version is caught and rolled back, with evidence in the PR.
+- [ ] The Grafana dashboard shows latency, error rate, and a drift signal for the model service.
+
+### Stretch
+- Run the same model through SageMaker training + endpoint + Model Registry, and write a short comparison: self-managed (MLflow/KServe) vs managed (SageMaker) — cost, control, and when to pick each.
+
+---
+
+## Story 14 — Data platform: Databricks medallion pipeline
+
+**Tools:** Databricks, PySpark, Delta Lake, Unity Catalog, Airflow or Databricks Jobs, Terraform
+**Concepts you'll learn:** medallion architecture (Bronze → Silver → Gold), data-quality checks, data contracts, pipeline orchestration, cost per pipeline.
+**Depends on:** Story 5 (Terraform). This story feeds Story 13's retraining — do it before you need fresh training data at scale.
+
+### Tasks
+1. Build a PySpark/Databricks pipeline in medallion form: Bronze (raw ingest), Silver (cleaned/validated), Gold (model-ready aggregates).
+2. Add data-quality checks and a written data contract for the Gold table (schema, freshness, null/duplicate rules).
+3. Orchestrate with Airflow or Databricks Jobs, with retries and alerting on failure.
+4. Track cost per pipeline run, and record one cost optimisation you applied.
+5. Prove the Gold table can be used as training input for Story 13's model.
+
+### Acceptance criteria
+- [ ] The pipeline runs end to end: Bronze → Silver → Gold, with evidence of each layer.
+- [ ] A deliberately bad input fails a quality check and blocks the Gold update (prove it, then revert).
+- [ ] The data contract is written down and enforced, not just described.
+- [ ] Cost per pipeline run is recorded, with at least one optimisation noted.
+
+### Stretch
+- Unity Catalog governance: cluster policies, workspace permissions, and lineage for the Gold table, with the tradeoffs written up.
+
+---
+
+## Story 15 — RAG / LLMOps: retrieval, evaluation, guardrails
+
+**Tools:** Amazon Bedrock (or a local open model), pgvector or Qdrant, LangChain or LlamaIndex, embeddings, reranking, evaluation harness, tracing
+**Concepts you'll learn:** embeddings and chunking, hybrid search and reranking, prompt/model versioning, LLM evaluation, tracing, guardrails and PII handling.
+**Depends on:** Story 13.
+
+### Tasks
+1. Embed a small document set (TaskBoard docs are a good start) and store embeddings in pgvector or Qdrant.
+2. Build retrieval + reranking + generation: query → retrieve → rerank → generate, on Bedrock (or a local open model — record the choice and cost).
+3. Add an evaluation harness: a handful of questions with expected answers, scored for relevance/faithfulness, latency, and cost.
+4. Version prompts and models, and add tracing so you can follow one request from query to answer.
+5. Add guardrails and PII redaction, and prove a PII test input is blocked/redacted.
+
+### Acceptance criteria
+- [ ] The RAG service answers questions from the document set, with retrieved sources visible in the response or logs.
+- [ ] The evaluation harness runs and produces scores, not just vibes — a bad retrieval change moves the score, with evidence.
+- [ ] Prompt and model versions are recorded, and a traced request is viewable end to end.
+- [ ] A PII test input is blocked or redacted, with evidence in the PR.
+
+### Stretch
+- Add an agent step (one tool call, e.g. look up a task by ID) with LangGraph/LlamaIndex, and write up where agents help vs where plain RAG is enough.
+
+---
+
+## Story 16 — AI SRE hardening: SLOs, failover, AI cost
+
+**Tools:** Grafana alerts, PagerDuty / Opsgenie, Karpenter / GPU scheduling concepts, vLLM / TGI concepts, FinOps reporting
+**Concepts you'll learn:** SLOs for AI services, LLM failure modes, failover between models/providers, blue/green model promotion, cost per request/token, AI incident response.
+**Depends on:** Story 15, and the SLO concepts from Story 12 (do this story before Story 12 teardown).
+
+### Tasks
+1. Define SLOs for the Story 15 RAG service: p95 latency, availability, error rate, and cost per request, with error-budget math.
+2. Wire Grafana alerts to PagerDuty/Opsgenie, linked to a runbook in `docs/runbooks/`: RAG service down, latency spike, provider failure, cost spike.
+3. Prove failover between two models/providers: kill or degrade the primary, watch traffic move, restore, and time it.
+4. Practice blue/green model promotion: a new model version serves a fraction of traffic, then all traffic, with rollback documented.
+5. Produce a FinOps-style AI cost report: cost per request/token, and one optimisation (caching, smaller model, batching) with measured effect.
+6. Game day for the AI service: break it on purpose, follow the runbook, restore, and write a blameless postmortem with one concrete follow-up.
+
+### Acceptance criteria
+- [ ] SLOs for the RAG service are written down with error budgets and shown in Grafana.
+- [ ] A real alert fires, routes to PagerDuty/Opsgenie, and links to a runbook that actually helped.
+- [ ] Failover between models/providers is proved, with timings in the PR.
+- [ ] Cost per request/token is reported, with at least one measured optimisation.
+- [ ] A postmortem exists for the AI game day, with a concrete follow-up.
+- [ ] Story 12 teardown is still the final step after this story — do not tear down before these AI stories are done, or re-provision first.
